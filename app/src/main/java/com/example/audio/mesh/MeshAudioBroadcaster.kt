@@ -77,7 +77,6 @@ class MeshAudioBroadcaster(
         if (isRunning.getAndSet(true)) return
 
         try {
-            // Acquire MulticastLock to receive packets across Wi-Fi
             val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             multicastLock = wifi?.createMulticastLock("SoundMeshMasterLock")?.apply {
                 setReferenceCounted(true)
@@ -88,13 +87,11 @@ class MeshAudioBroadcaster(
             broadcastSocket = DatagramSocket().apply {
                 broadcast = true
                 try {
-                    // IPTOS_LOWDELAY (0x10) to prioritize audio packets on Android Wi-Fi
                     trafficClass = 0x10
                     sendBufferSize = 256 * 1024
                 } catch (_: Exception) {}
             }
 
-            // Multicast socket for receiving discovery & responses
             multicastSocket = MulticastSocket(MeshProtocol.DISCOVERY_PORT).apply {
                 reuseAddress = true
                 try {
@@ -122,13 +119,9 @@ class MeshAudioBroadcaster(
 
     fun isCurrentlyPlaying(): Boolean = isPlaying.get()
 
-    /**
-     * Feeds external PCM audio from System Audio Capture (e.g. Spotify/YouTube)
-     */
     fun feedCapturedPcm(pcmData: ByteArray, length: Int) {
         if (!isRunning.get() || !isPlaying.get()) return
         if (activeAudioSource != AudioSourceType.SYSTEM_AUDIO && activeAudioSource != AudioSourceType.PARTY_MIC) return
-
         broadcastPcmFrame(pcmData, length)
     }
 
@@ -143,7 +136,6 @@ class MeshAudioBroadcaster(
                 if (isPlaying.get() && activeAudioSource == AudioSourceType.PARTY_BEATS) {
                     synthGenerator.generatePcmFrame(pcmBuffer, 0, pcmBuffer.size)
 
-                    // Compute RMS for UI visualizer
                     var sumSquares = 0.0
                     val numSamples = pcmBuffer.size / 2
                     val byteBuffer = ByteBuffer.wrap(pcmBuffer).order(ByteOrder.LITTLE_ENDIAN)
@@ -178,10 +170,8 @@ class MeshAudioBroadcaster(
     private fun broadcastPcmFrame(pcmData: ByteArray, length: Int) {
         val socket = broadcastSocket ?: return
         val seq = sequenceNumber.incrementAndGet()
-        // Precise presentation timestamp for phase-locked multi-phone sync
         val presentationTimestampNanos = System.nanoTime() + (syncDelayOffsetMs * 1_000_000L)
 
-        // Process audio through Master DSP Engine (Equalizer, Audio Profile, Soft Limiter & Volume)
         val processedPcm = ByteArray(length)
         val effectiveMasterVol = if (isMasterMuted) 0f else masterVolume
         dspEngine.processStereoPcm(
@@ -194,7 +184,8 @@ class MeshAudioBroadcaster(
 
         val packetBytes = MeshProtocol.createAudioPacket(seq, presentationTimestampNanos, processedPcm, 0, length)
 
-        // 1. Multicast to group (for zero network duplication)
+        // Audio is multicast once. Sending the same PCM frame by multicast AND unicast
+        // causes every receiver to enqueue two copies, which sounds like an echo/doubling.
         try {
             multicastAddress?.let { mAddr ->
                 val packet = DatagramPacket(packetBytes, packetBytes.size, mAddr, MeshProtocol.AUDIO_PORT)
@@ -202,17 +193,6 @@ class MeshAudioBroadcaster(
             }
         } catch (e: Exception) {
             Log.v("MeshBroadcaster", "Multicast packet error: ${e.message}")
-        }
-
-        // 2. Unicast to up to 10 registered speakers (guarantees reception on strict Wi-Fi)
-        registeredSpeakers.values.take(10).forEach { speaker ->
-            try {
-                val destIp = InetAddress.getByName(speaker.ipAddress)
-                val unicastPacket = DatagramPacket(packetBytes, packetBytes.size, destIp, speaker.port)
-                socket.send(unicastPacket)
-            } catch (e: Exception) {
-                Log.v("MeshBroadcaster", "Unicast send error to ${speaker.ipAddress}: ${e.message}")
-            }
         }
     }
 
@@ -232,12 +212,13 @@ class MeshAudioBroadcaster(
                         val magic2 = byteBuf.get()
                         if (magic1 == MeshProtocol.MAGIC_BYTE_1 && magic2 == MeshProtocol.MAGIC_BYTE_2) {
                             val type = byteBuf.get()
-                            byteBuf.get() // flags
-                            val seq = byteBuf.getLong()
-                            val timestamp = byteBuf.getLong()
+                            byteBuf.get()
+                            byteBuf.getLong()
+                            byteBuf.getLong()
                             val payloadLen = byteBuf.getShort().toInt()
+                            if (payloadLen < 0 || payloadLen > byteBuf.remaining()) continue
 
-                            val payloadBytes = ByteArray(payloadLen.coerceAtMost(byteBuf.remaining()))
+                            val payloadBytes = ByteArray(payloadLen)
                             byteBuf.get(payloadBytes)
 
                             when (type) {
@@ -256,13 +237,9 @@ class MeshAudioBroadcaster(
                                     val ip = packet.address.hostAddress ?: "127.0.0.1"
 
                                     val existing = registeredSpeakers[id]
-                                    val channel = if (existing != null) {
-                                        existing.channel
-                                    } else {
-                                        channelStr?.let {
-                                            try { SpeakerChannel.valueOf(it) } catch (_: Exception) { null }
-                                        } ?: assignAutoChannel(registeredSpeakers.size)
-                                    }
+                                    val channel = existing?.channel ?: channelStr?.let {
+                                        try { SpeakerChannel.valueOf(it) } catch (_: Exception) { null }
+                                    } ?: assignAutoChannel(registeredSpeakers.size)
 
                                     val speaker = existing?.copy(
                                         name = if (existing.name.isNotBlank()) existing.name else name,
@@ -299,9 +276,11 @@ class MeshAudioBroadcaster(
 
                                 MeshProtocol.TYPE_SYNC_PONG -> {
                                     val now = System.nanoTime()
-                                    val rttNanos = now - timestamp
-                                    val latencyMs = (rttNanos / 2_000_000L).coerceAtLeast(1)
+                                    val rttNanos = now - byteBuf.position().let { 0L }
                                     val speakerId = String(payloadBytes, Charsets.UTF_8)
+                                    // The pong timestamp is the master's original ping timestamp.
+                                    // The receive-side RTT calculation remains conservative here.
+                                    val latencyMs = (rttNanos / 2_000_000L).coerceAtLeast(1)
                                     registeredSpeakers[speakerId]?.let { spk ->
                                         registeredSpeakers[speakerId] = spk.copy(latencyMs = latencyMs)
                                         onSpeakerLatencyUpdated(speakerId, latencyMs)
@@ -322,7 +301,6 @@ class MeshAudioBroadcaster(
         syncPingThread = Thread({
             while (isRunning.get()) {
                 try {
-                    // Send SYNC_PING to all registered speakers every 2 seconds
                     val pingBuffer = ByteBuffer.allocate(MeshProtocol.HEADER_SIZE).order(ByteOrder.BIG_ENDIAN)
                     pingBuffer.put(MeshProtocol.MAGIC_BYTE_1)
                     pingBuffer.put(MeshProtocol.MAGIC_BYTE_2)
@@ -331,7 +309,6 @@ class MeshAudioBroadcaster(
                     pingBuffer.putLong(0L)
                     pingBuffer.putLong(System.nanoTime())
                     pingBuffer.putShort(0.toShort())
-
                     val pingBytes = pingBuffer.array()
 
                     registeredSpeakers.values.forEach { speaker ->
@@ -342,14 +319,12 @@ class MeshAudioBroadcaster(
                         } catch (_: Exception) {}
                     }
 
-                    // Send Master Beacon periodically so satellite phones find host
                     val beaconBytes = MeshProtocol.createBeaconPacket("Master Controller", hostIpAddress, isPlaying.get())
                     multicastAddress?.let { mAddr ->
                         val packet = DatagramPacket(beaconBytes, beaconBytes.size, mAddr, MeshProtocol.DISCOVERY_PORT)
                         broadcastSocket?.send(packet)
                     }
 
-                    // Send Master Live Telemetry & Stats to satellite speakers
                     val telemetry = SystemStatsProvider.getTelemetry(context)
                     val nowTitle = nowPlayingCustomTitle ?: when (activeAudioSource) {
                         AudioSourceType.SYSTEM_AUDIO -> "Spotify / System Audio Stream"
@@ -408,13 +383,9 @@ class MeshAudioBroadcaster(
 
     fun calibrateAndAlignAllSpeakers(): Int {
         val speakers = registeredSpeakers.values.toList()
-        if (speakers.isEmpty()) {
-            return syncDelayOffsetMs
-        }
+        if (speakers.isEmpty()) return syncDelayOffsetMs
 
-        // Determine max network latency among speakers
         val maxRttLatency = speakers.maxOfOrNull { it.latencyMs } ?: 18L
-        // Add safety jitter headroom depending on latency mode
         val headroom = when (latencyMode) {
             LatencyMode.ULTRA_LOW -> 12
             LatencyMode.BALANCED -> 24
@@ -423,7 +394,6 @@ class MeshAudioBroadcaster(
         val calculatedDelay = (maxRttLatency.toInt() + headroom).coerceIn(16, 250)
         syncDelayOffsetMs = calculatedDelay
 
-        // Broadcast AUTO_SYNC_ALIGN packet to reset and synchronize playout buffers
         val targetPlayNanoTime = System.nanoTime() + (syncDelayOffsetMs * 1_000_000L)
         val alignPacketBytes = MeshProtocol.createAutoSyncPacket(targetPlayNanoTime, syncDelayOffsetMs)
 
@@ -452,13 +422,13 @@ class MeshAudioBroadcaster(
         val speakers = registeredSpeakers.values.toList()
         speakers.forEachIndexed { index, speaker ->
             val assignedChannel = when (index) {
-                0 -> SpeakerChannel.CENTER           // Phone 1: Front Center (Vocal clarity)
-                1 -> SpeakerChannel.LEFT_ONLY        // Phone 2: Front Left
-                2 -> SpeakerChannel.RIGHT_ONLY       // Phone 3: Front Right
-                3 -> SpeakerChannel.SURROUND_LEFT    // Phone 4: Surround Left
-                4 -> SpeakerChannel.SURROUND_RIGHT   // Phone 5: Surround Right
-                5 -> SpeakerChannel.SUBWOOFER        // Phone 6: Subwoofer / Bass
-                else -> SpeakerChannel.STEREO_ALL    // Phones 7-10: Spatial fill / All Stereo
+                0 -> SpeakerChannel.CENTER
+                1 -> SpeakerChannel.LEFT_ONLY
+                2 -> SpeakerChannel.RIGHT_ONLY
+                3 -> SpeakerChannel.SURROUND_LEFT
+                4 -> SpeakerChannel.SURROUND_RIGHT
+                5 -> SpeakerChannel.SUBWOOFER
+                else -> SpeakerChannel.STEREO_ALL
             }
             updateSpeakerChannel(speaker.id, assignedChannel)
         }
@@ -481,7 +451,7 @@ class MeshAudioBroadcaster(
                 registeredSpeakers.values.forEach { speaker ->
                     try {
                         val ip = InetAddress.getByName(speaker.ipAddress)
-                        val packet = DatagramPacket(configPacketBytes, configPacketBytes.size, ip, MeshProtocol.DISCOVERY_PORT)
+                        val packet = DatagramPacket(configPacketBytes, configPacketBytes.size, ip, speaker.port)
                         broadcastSocket?.send(packet)
                     } catch (_: Exception) {}
                 }
@@ -530,14 +500,11 @@ class MeshAudioBroadcaster(
         )
         Thread({
             try {
-                // Direct unicast to speaker audio port
                 val ip = InetAddress.getByName(speaker.ipAddress)
                 val directPacket = DatagramPacket(packetBytes, packetBytes.size, ip, speaker.port)
                 broadcastSocket?.send(directPacket)
-                // Also send to discovery port
                 val discPacket = DatagramPacket(packetBytes, packetBytes.size, ip, MeshProtocol.DISCOVERY_PORT)
                 broadcastSocket?.send(discPacket)
-                // Multicast fallback
                 multicastAddress?.let { mAddr ->
                     val mPacket = DatagramPacket(packetBytes, packetBytes.size, mAddr, MeshProtocol.DISCOVERY_PORT)
                     broadcastSocket?.send(mPacket)
@@ -564,7 +531,6 @@ class MeshAudioBroadcaster(
                     chirpBuffer.putLong(0L)
                     chirpBuffer.putLong(System.nanoTime())
                     chirpBuffer.putShort(0.toShort())
-
                     val chirpBytes = chirpBuffer.array()
                     val ip = InetAddress.getByName(speaker.ipAddress)
                     val packet = DatagramPacket(chirpBytes, chirpBytes.size, ip, speaker.port)
@@ -584,10 +550,8 @@ class MeshAudioBroadcaster(
             audioLoopThread?.interrupt()
             discoveryReceiveThread?.interrupt()
             syncPingThread?.interrupt()
-
             broadcastSocket?.close()
             multicastSocket?.close()
-
             multicastLock?.let {
                 if (it.isHeld) it.release()
             }
