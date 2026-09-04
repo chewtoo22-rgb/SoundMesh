@@ -1,9 +1,6 @@
 package com.example.model
 
-enum class DeviceRole {
-    MASTER,
-    SPEAKER
-}
+enum class DeviceRole { MASTER, SPEAKER }
 
 enum class AudioSourceType(val displayName: String, val subtitle: String) {
     SYSTEM_AUDIO("All Apps (System Audio)", "Capture Spotify, YouTube, Chrome, Games & Media"),
@@ -12,14 +9,9 @@ enum class AudioSourceType(val displayName: String, val subtitle: String) {
 }
 
 enum class SpeakerChannel(val label: String, val shortName: String) {
-    STEREO_ALL("Full Stereo (L + R)", "L+R"),
-    LEFT_ONLY("Left Channel", "LEFT"),
-    RIGHT_ONLY("Right Channel", "RIGHT"),
-    CENTER("Center / Vocal", "CTR"),
-    SURROUND_LEFT("Surround Left", "SUR-L"),
-    SURROUND_RIGHT("Surround Right", "SUR-R"),
-    SUBWOOFER("Subwoofer / Bass", "SUB"),
-    MONO_MIX("Mono Mix", "MONO")
+    STEREO_ALL("Full Stereo (L + R)", "L+R"), LEFT_ONLY("Left Channel", "LEFT"), RIGHT_ONLY("Right Channel", "RIGHT"),
+    CENTER("Center / Vocal", "CTR"), SURROUND_LEFT("Surround Left", "SUR-L"), SURROUND_RIGHT("Surround Right", "SUR-R"),
+    SUBWOOFER("Subwoofer / Bass", "SUB"), MONO_MIX("Mono Mix", "MONO")
 }
 
 enum class LatencyMode(val title: String, val subtitle: String, val bufferTargetMs: Int, val samplesPerFrame: Int) {
@@ -43,17 +35,13 @@ enum class AudioProfile(val title: String, val description: String, val tag: Str
 }
 
 enum class EqualizerPreset(val displayName: String) {
-    FLAT("Flat / Natural"), BASS_BOOST("Bass Boost"), VOCAL_CLEAR("Vocal Clarity"), ELECTRONIC("Club / Dance"), ROCK_POP("Rock / Pop"), ACOUSTIC("Acoustic Warmth"), CUSTOM("Custom EQ")
+    FLAT("Flat / Natural"), BASS_BOOST("Bass Boost"), VOCAL_CLEAR("Vocal Clarity"), ELECTRONIC("Club / Dance"),
+    ROCK_POP("Rock / Pop"), ACOUSTIC("Acoustic Warmth"), CUSTOM("Custom EQ")
 }
 
 data class EqualizerSettings(
-    val preset: EqualizerPreset = EqualizerPreset.FLAT,
-    val band60Hz: Float = 0f,
-    val band250Hz: Float = 0f,
-    val band1kHz: Float = 0f,
-    val band4kHz: Float = 0f,
-    val band12kHz: Float = 0f,
-    val isEnabled: Boolean = true
+    val preset: EqualizerPreset = EqualizerPreset.FLAT, val band60Hz: Float = 0f, val band250Hz: Float = 0f,
+    val band1kHz: Float = 0f, val band4kHz: Float = 0f, val band12kHz: Float = 0f, val isEnabled: Boolean = true
 ) {
     companion object {
         fun fromPreset(preset: EqualizerPreset): EqualizerSettings = when (preset) {
@@ -79,19 +67,15 @@ data class MasterSystemStats(
 )
 
 enum class SpatialZone(
-    val id: String,
-    val displayName: String,
-    val shortName: String,
-    val subtitle: String,
-    val defaultChannel: SpeakerChannel,
-    val defaultProfile: AudioProfile = AudioProfile.ALL_STEREO
+    val id: String, val displayName: String, val shortName: String, val subtitle: String,
+    val defaultChannel: SpeakerChannel, val defaultProfile: AudioProfile = AudioProfile.ALL_STEREO
 ) {
-    LEFT_STAGE("Left Stage", "LEFT", "Stage Left & Front-Left placement", "Stage Left & Front-Left placement", SpeakerChannel.LEFT_ONLY),
-    CENTER_STAGE("Center Stage", "CENTER", "Vocal clarity, lead dialogue & focus", "Vocal clarity, lead dialogue & focus", SpeakerChannel.CENTER, AudioProfile.VOCAL_BOOST),
-    RIGHT_STAGE("Right Stage", "RIGHT", "Stage Right & Front-Right placement", "Stage Right & Front-Right placement", SpeakerChannel.RIGHT_ONLY),
-    REAR_SURROUND("Rear Surround", "SURROUND", "Ambient 3D surround sound", "Ambient 3D surround sound", SpeakerChannel.SURROUND_LEFT, AudioProfile.WIDE_STAGE),
-    SUB_BASS("Sub / Bass Zone", "SUB/BASS", "Dedicated low-end bass reinforcement", "Dedicated low-end bass reinforcement", SpeakerChannel.SUBWOOFER, AudioProfile.BASS_BLAST),
-    ALL_PARTY("Whole Room", "PARTY", "All-around stereo party room fill", "All-around stereo party room fill", SpeakerChannel.STEREO_ALL, AudioProfile.ALL_STEREO)
+    LEFT_STAGE("Left Stage", "LEFT", "Stage Left", "Stage Left & Front-Left placement", SpeakerChannel.LEFT_ONLY),
+    CENTER_STAGE("Center Stage", "CENTER", "Center", "Vocal clarity, lead dialogue & focus", SpeakerChannel.CENTER, AudioProfile.VOCAL_BOOST),
+    RIGHT_STAGE("Right Stage", "RIGHT", "Stage Right", "Stage Right & Front-Right placement", SpeakerChannel.RIGHT_ONLY),
+    REAR_SURROUND("Rear Surround", "SURROUND", "Rear", "Ambient 3D surround sound", SpeakerChannel.SURROUND_LEFT, AudioProfile.WIDE_STAGE),
+    SUB_BASS("Sub / Bass Zone", "SUB/BASS", "Sub", "Dedicated low-end bass reinforcement", SpeakerChannel.SUBWOOFER, AudioProfile.BASS_BLAST),
+    ALL_PARTY("Whole Room", "PARTY", "Party", "All-around stereo party room fill", SpeakerChannel.STEREO_ALL, AudioProfile.ALL_STEREO)
 }
 
 data class SpeakerDevice(
@@ -109,16 +93,18 @@ data class MeshState(
     val isMasterMuted: Boolean = false, val audioSource: AudioSourceType = AudioSourceType.SYSTEM_AUDIO,
     val connectedSpeakers: List<SpeakerDevice> = emptyList(), val maxSpeakers: Int = 10, val syncDelayOffsetMs: Int = 40,
     val latencyMode: LatencyMode = LatencyMode.BALANCED, val soundQuality: SoundQualityMode = SoundQualityMode.STUDIO_HIFI,
-    val audioProfile: AudioProfile = AudioProfile.ALL_STEREO, val equalizer: EqualizerSettings = EqualizerSettings(),
-    val isAutoSyncing: Boolean = false, val isSyncCalibrated: Boolean = true, val localChannel: SpeakerChannel = SpeakerChannel.STEREO_ALL,
-    val localZone: SpatialZone = SpatialZone.ALL_PARTY, val localEqualizer: EqualizerSettings = EqualizerSettings(),
-    val selectedZoneFilter: SpatialZone? = null, val localVolume: Float = 0.90f, val localLatencyTrimMs: Int = 0,
-    val isConnectedToMaster: Boolean = false, val connectedMasterIp: String? = null, val hostIpAddress: String = "127.0.0.1",
-    val isHotspotActive: Boolean = false, val isSystemCaptureActive: Boolean = false, val liveRmsLevel: Float = 0.0f,
+    val audioProfile: AudioProfile = AudioProfile.ALL_STEREO, val localAudioProfile: AudioProfile = AudioProfile.ALL_STEREO,
+    val equalizer: EqualizerSettings = EqualizerSettings(), val isAutoSyncing: Boolean = false, val isSyncCalibrated: Boolean = true,
+    val localChannel: SpeakerChannel = SpeakerChannel.STEREO_ALL, val localZone: SpatialZone = SpatialZone.ALL_PARTY,
+    val localEqualizer: EqualizerSettings = EqualizerSettings(), val selectedZoneFilter: SpatialZone? = null,
+    val localVolume: Float = 0.90f, val localLatencyTrimMs: Int = 0, val isConnectedToMaster: Boolean = false,
+    val connectedMasterIp: String? = null, val hostIpAddress: String = "127.0.0.1", val isHotspotActive: Boolean = false,
+    val isSystemCaptureActive: Boolean = false, val liveRmsLevel: Float = 0.0f,
     val liveFrequencyBands: List<Float> = listOf(0.1f, 0.2f, 0.3f, 0.4f, 0.3f, 0.2f, 0.1f, 0.05f),
     val statusMessage: String = "Ready to connect up to 10 speaker phones", val isAudioEngineRunning: Boolean = false,
     val packetsTransferred: Long = 0, val activeBitrateKbps: Int = 1411, val masterStats: MasterSystemStats = MasterSystemStats(),
     val localBatteryPercent: Int = 88, val localIsCharging: Boolean = false, val localWifiSignalDbm: Int = -50,
     val localWifiSignalLevel: Int = 4, val localWifiSsid: String = "SoundMesh Wi-Fi", val localDeviceModel: String = "Android Device",
-    val nowPlayingTrackTitle: String = "Spotify / All Apps System Audio", val nowPlayingTrackArtist: String = "All Apps Audio Capture (44.1 kHz PCM)"
+    val nowPlayingTrackTitle: String = "Spotify / All Apps System Audio",
+    val nowPlayingTrackArtist: String = "All Apps Audio Capture (44.1 kHz PCM)"
 )
