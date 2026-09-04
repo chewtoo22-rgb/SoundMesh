@@ -111,4 +111,11 @@ class SynthesizerAudioGenerator {
     fun reset() {
         sampleCounter = 0
     }
+
+    fun updateMode(newMode: SynthMode) {
+        if (mode != newMode) {
+            mode = newMode
+            reset()
+        }
+    }
 }
