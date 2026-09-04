@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.NetworkInterface
 import java.util.UUID
 
@@ -231,7 +232,7 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
                     _state.update {
                         it.copy(
                             localZone = zone,
-                            localAudioProfile = profile,
+                            audioProfile = profile,
                             localEqualizer = eq,
                             localChannel = channel,
                             localLatencyTrimMs = trimMs,
@@ -323,7 +324,7 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun setSynthMode(mode: SynthMode) {
-        // Will set mode inside broadcaster's internal synth
+        broadcaster?.setSynthMode(mode)
         _state.update { it.copy(statusMessage = "Synth Beat Mode: ${mode.name}") }
     }
 
@@ -735,8 +736,32 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun connectToMasterIp(ip: String) {
-        _state.update { it.copy(connectedMasterIp = ip, isConnectedToMaster = true) }
-        receiver?.masterIpAddress = ip
+        val normalizedIp = ip.trim()
+        val isValidIp = try {
+            InetAddress.getByName(normalizedIp)
+            normalizedIp.isNotEmpty()
+        } catch (_: Exception) {
+            false
+        }
+
+        if (!isValidIp) {
+            _state.update {
+                it.copy(
+                    isConnectedToMaster = false,
+                    statusMessage = "Enter a valid master IP address"
+                )
+            }
+            return
+        }
+
+        _state.update {
+            it.copy(
+                connectedMasterIp = normalizedIp,
+                isConnectedToMaster = false,
+                statusMessage = "Connecting to Master: $normalizedIp"
+            )
+        }
+        receiver?.masterIpAddress = normalizedIp
     }
 
     override fun onCleared() {
