@@ -34,7 +34,6 @@ class MeshAudioBroadcaster(
     private val isRunning = AtomicBoolean(false)
     private val isPlaying = AtomicBoolean(false)
     private val sequenceNumber = AtomicLong(0)
-    private val pendingSyncPings = ConcurrentHashMap<String, Long>()
 
     private var broadcastSocket: DatagramSocket? = null
     private var multicastSocket: MulticastSocket? = null
@@ -116,6 +115,10 @@ class MeshAudioBroadcaster(
 
     fun setPlaying(playing: Boolean) {
         isPlaying.set(playing)
+    }
+
+    fun setSynthMode(mode: com.example.audio.synth.SynthMode) {
+        synthGenerator.updateMode(mode)
     }
 
     fun isCurrentlyPlaying(): Boolean = isPlaying.get()
@@ -215,7 +218,7 @@ class MeshAudioBroadcaster(
                             val type = byteBuf.get()
                             byteBuf.get()
                             byteBuf.getLong()
-                            byteBuf.getLong()
+                            val packetTimestampNanos = byteBuf.getLong()
                             val payloadLen = byteBuf.getShort().toInt()
                             if (payloadLen < 0 || payloadLen > byteBuf.remaining()) continue
 
@@ -277,15 +280,12 @@ class MeshAudioBroadcaster(
 
                                 MeshProtocol.TYPE_SYNC_PONG -> {
                                     val now = System.nanoTime()
+                                    val rttNanos = (now - packetTimestampNanos).coerceAtLeast(0L)
                                     val speakerId = String(payloadBytes, Charsets.UTF_8)
-                                    val pingSentNanos = pendingSyncPings.remove(speakerId)
-                                    if (pingSentNanos != null) {
-                                        val rttNanos = (now - pingSentNanos).coerceAtLeast(0L)
-                                        val latencyMs = (rttNanos / 2_000_000L).coerceAtLeast(1L)
-                                        registeredSpeakers[speakerId]?.let { spk ->
-                                            registeredSpeakers[speakerId] = spk.copy(latencyMs = latencyMs)
-                                            onSpeakerLatencyUpdated(speakerId, latencyMs)
-                                        }
+                                    val latencyMs = (rttNanos / 2_000_000L).coerceAtLeast(1)
+                                    registeredSpeakers[speakerId]?.let { spk ->
+                                        registeredSpeakers[speakerId] = spk.copy(latencyMs = latencyMs)
+                                        onSpeakerLatencyUpdated(speakerId, latencyMs)
                                     }
                                 }
                             }
@@ -303,20 +303,20 @@ class MeshAudioBroadcaster(
         syncPingThread = Thread({
             while (isRunning.get()) {
                 try {
+                    val pingBuffer = ByteBuffer.allocate(MeshProtocol.HEADER_SIZE).order(ByteOrder.BIG_ENDIAN)
+                    pingBuffer.put(MeshProtocol.MAGIC_BYTE_1)
+                    pingBuffer.put(MeshProtocol.MAGIC_BYTE_2)
+                    pingBuffer.put(MeshProtocol.TYPE_SYNC_PING)
+                    pingBuffer.put(0.toByte())
+                    pingBuffer.putLong(0L)
+                    pingBuffer.putLong(System.nanoTime())
+                    pingBuffer.putShort(0.toShort())
+                    val pingBytes = pingBuffer.array()
+
                     registeredSpeakers.values.forEach { speaker ->
                         try {
-                            val pingTimestamp = System.nanoTime()
-                            val pingBuffer = ByteBuffer.allocate(MeshProtocol.HEADER_SIZE).order(ByteOrder.BIG_ENDIAN)
-                            pingBuffer.put(MeshProtocol.MAGIC_BYTE_1)
-                            pingBuffer.put(MeshProtocol.MAGIC_BYTE_2)
-                            pingBuffer.put(MeshProtocol.TYPE_SYNC_PING)
-                            pingBuffer.put(0.toByte())
-                            pingBuffer.putLong(0L)
-                            pingBuffer.putLong(pingTimestamp)
-                            pingBuffer.putShort(0.toShort())
                             val ip = InetAddress.getByName(speaker.ipAddress)
-                            val packet = DatagramPacket(pingBuffer.array(), pingBuffer.array().size, ip, speaker.port)
-                            pendingSyncPings[speaker.id] = pingTimestamp
+                            val packet = DatagramPacket(pingBytes, pingBytes.size, ip, speaker.port)
                             broadcastSocket?.send(packet)
                         } catch (_: Exception) {}
                     }
@@ -519,7 +519,6 @@ class MeshAudioBroadcaster(
 
     fun removeSpeaker(speakerId: String) {
         registeredSpeakers.remove(speakerId)
-        pendingSyncPings.remove(speakerId)
     }
 
     fun sendChirp(speakerId: String) {
@@ -548,7 +547,6 @@ class MeshAudioBroadcaster(
     fun stop() {
         isRunning.set(false)
         isPlaying.set(false)
-        pendingSyncPings.clear()
 
         try {
             audioLoopThread?.interrupt()
