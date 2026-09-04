@@ -70,14 +70,8 @@ class SystemAudioCaptureManager(
                 }
 
                 else -> {
-                    // Fallback or test mic
-                    AudioRecord(
-                        MediaRecorder.AudioSource.DEFAULT,
-                        sampleRate,
-                        channelConfig,
-                        audioFormat,
-                        bufferSize
-                    )
+                    onError("System audio capture requires Android 10 or newer and playback access.")
+                    return
                 }
             }
 
