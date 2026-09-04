@@ -46,7 +46,7 @@ class ExampleUnitTest {
             name = "Rear Right Satellite",
             deviceModel = "Pixel 8 Pro",
             ipAddress = "192.168.1.25",
-            channel = SpeakerChannel.REAR_RIGHT,
+            channel = SpeakerChannel.SURROUND_RIGHT,
             batteryPercent = 78,
             isCharging = false,
             wifiSignalDbm = -52,
