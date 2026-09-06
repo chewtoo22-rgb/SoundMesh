@@ -1,6 +1,6 @@
 {
   "name": "SoundMesh",
-  "description": "Pair up to 10 Android phones together as synchronized low-latency wireless speakers with anti-echo presentation sync, 5-band EQ, 5.1 surround simulation, and system-wide audio capture.",
+  "description": "Pair up to 10 Android phones as synchronized low-latency wireless speakers. System audio capture, live mic, party synth, anti-echo sync, 5-band EQ, spatial zones, and 5.1-style channel routing — all on your local Wi‑Fi.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }
