@@ -29,6 +29,8 @@ Turn up to **10 Android phones** into a synchronized, low-latency wireless multi
 
 > Best results: same 5 GHz Wi‑Fi or phone hotspot, devices reasonably close, Balanced or Rock-Solid latency mode for media.
 
+Wire format details: **[docs/PROTOCOL.md](docs/PROTOCOL.md)**.
+
 ---
 
 ## Requirements
@@ -117,6 +119,12 @@ Audio stays on your local network; there is no cloud streaming path in the core 
 - Package rename from `com.example` → stable production namespace  
 
 ---
+
+## Docs
+
+- [Wire protocol](docs/PROTOCOL.md)
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## License
 
