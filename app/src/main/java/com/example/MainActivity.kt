@@ -24,10 +24,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -44,16 +42,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -65,7 +59,6 @@ import com.example.model.DeviceRole
 import com.example.service.SoundMeshService
 import com.example.ui.MasterControllerScreen
 import com.example.ui.SpeakerReceiverScreen
-import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.ObsidianBg
 import com.example.ui.theme.ObsidianBorder
 import com.example.ui.theme.ObsidianCard
@@ -73,9 +66,9 @@ import com.example.ui.theme.ObsidianCardElevated
 import com.example.ui.theme.SonicAmber
 import com.example.ui.theme.SonicCyan
 import com.example.ui.theme.SonicEmerald
+import com.example.ui.theme.SoundMeshTheme
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
-import com.example.ui.theme.TextTertiary
 import com.example.viewmodel.SoundMeshViewModel
 
 class MainActivity : ComponentActivity() {
@@ -88,12 +81,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Setup Media Projection Launcher for Audio Playback Capture (All Apps)
         mediaProjectionLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                val projectionManager =
+                    getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                 val projection = projectionManager.getMediaProjection(result.resultCode, result.data!!)
                 if (projection != null) {
                     viewModel.setMediaProjection(projection)
@@ -101,18 +94,15 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Setup Runtime Permissions Launcher
         permissionsLauncher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
-        ) { permissions ->
-            // Permissions handled
-        }
+        ) { /* results handled implicitly; engine checks grants at use-time */ }
 
         requestAppPermissions()
         startMeshForegroundService()
 
         setContent {
-            MyApplicationTheme {
+            SoundMeshTheme {
                 val state by viewModel.state.collectAsState()
 
                 Scaffold(
@@ -125,7 +115,6 @@ class MainActivity : ComponentActivity() {
                         SoundMeshTopBar(
                             currentRole = state.role,
                             onRoleSelected = { viewModel.selectRole(it) },
-                            connectedCount = state.connectedSpeakers.size,
                             isPlaying = state.isPlaying
                         )
                     }
@@ -151,11 +140,17 @@ class MainActivity : ComponentActivity() {
                                 onSelectSoundQuality = { viewModel.setSoundQuality(it) },
                                 onSelectAudioProfile = { viewModel.setAudioProfile(it) },
                                 onSelectEqualizerPreset = { viewModel.setEqualizerPreset(it) },
-                                onUpdateEqualizerBand = { index, gain -> viewModel.updateEqualizerBand(index, gain) },
+                                onUpdateEqualizerBand = { index, gain ->
+                                    viewModel.updateEqualizerBand(index, gain)
+                                },
                                 onToggleEqualizer = { viewModel.toggleEqualizer(it) },
-                                onSpeakerVolumeChange = { id, vol -> viewModel.updateSpeakerVolume(id, vol) },
+                                onSpeakerVolumeChange = { id, vol ->
+                                    viewModel.updateSpeakerVolume(id, vol)
+                                },
                                 onSpeakerMuteToggle = { id -> viewModel.toggleSpeakerMute(id) },
-                                onSpeakerChannelChange = { id, ch -> viewModel.updateSpeakerChannel(id, ch) },
+                                onSpeakerChannelChange = { id, ch ->
+                                    viewModel.updateSpeakerChannel(id, ch)
+                                },
                                 onPingSpeaker = { id -> viewModel.pingSpeaker(id) },
                                 onRemoveSpeaker = { id -> viewModel.removeSpeaker(id) },
                                 onAddDemoSpeaker = { viewModel.addDemoSpeaker() },
@@ -196,10 +191,11 @@ class MainActivity : ComponentActivity() {
 
     private fun launchSystemAudioCapture() {
         try {
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            val projectionManager =
+                getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
-        } catch (e: Exception) {
-            // Fallback or permission check
+        } catch (_: Exception) {
+            // Capture unavailable on this device / OEM restriction
         }
     }
 
@@ -207,11 +203,16 @@ class MainActivity : ComponentActivity() {
         try {
             val intent = Intent(this, SoundMeshService::class.java).apply {
                 action = SoundMeshService.ACTION_START
-                putExtra(SoundMeshService.EXTRA_TITLE, "SoundMesh")
-                putExtra(SoundMeshService.EXTRA_STATUS, "Wireless Multi-Speaker Mesh Active")
+                putExtra(SoundMeshService.EXTRA_TITLE, getString(R.string.app_name))
+                putExtra(
+                    SoundMeshService.EXTRA_STATUS,
+                    getString(R.string.notification_status_default)
+                )
             }
             ContextCompat.startForegroundService(this, intent)
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            // Service start can fail if FGS type restrictions apply; UI still works
+        }
     }
 }
 
@@ -220,7 +221,6 @@ class MainActivity : ComponentActivity() {
 fun SoundMeshTopBar(
     currentRole: DeviceRole,
     onRoleSelected: (DeviceRole) -> Unit,
-    connectedCount: Int,
     isPlaying: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -241,13 +241,10 @@ fun SoundMeshTopBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Brand Logo + Title
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Image(
                     painter = painterResource(id = R.drawable.ic_soundmesh_logo),
-                    contentDescription = "SoundMesh Logo",
+                    contentDescription = stringResource(R.string.app_name),
                     modifier = Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(8.dp))
@@ -257,7 +254,9 @@ fun SoundMeshTopBar(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = stringResource(id = R.string.app_name),
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
                             color = TextPrimary
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -269,7 +268,11 @@ fun SoundMeshTopBar(
                         )
                     }
                     Text(
-                        text = if (currentRole == DeviceRole.MASTER) "Master Broadcaster" else "Satellite Receiver",
+                        text = if (currentRole == DeviceRole.MASTER) {
+                            stringResource(R.string.role_master_subtitle)
+                        } else {
+                            stringResource(R.string.role_speaker_subtitle)
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = SonicCyan,
                         fontSize = 11.sp
@@ -277,7 +280,6 @@ fun SoundMeshTopBar(
                 }
             }
 
-            // Segmented Role Switcher: [ Master | Speaker ]
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
@@ -286,7 +288,6 @@ fun SoundMeshTopBar(
                     .padding(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Master Pill
                 val isMaster = currentRole == DeviceRole.MASTER
                 Box(
                     modifier = Modifier
@@ -306,7 +307,7 @@ fun SoundMeshTopBar(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Master",
+                            text = stringResource(R.string.role_master),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isMaster) ObsidianCardElevated else TextSecondary,
                             fontSize = 11.sp,
@@ -315,7 +316,6 @@ fun SoundMeshTopBar(
                     }
                 }
 
-                // Speaker Pill
                 val isSpeaker = currentRole == DeviceRole.SPEAKER
                 Box(
                     modifier = Modifier
@@ -335,7 +335,7 @@ fun SoundMeshTopBar(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Speaker",
+                            text = stringResource(R.string.role_speaker),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isSpeaker) ObsidianCardElevated else TextSecondary,
                             fontSize = 11.sp,
@@ -346,9 +346,4 @@ fun SoundMeshTopBar(
             }
         }
     }
-}
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(text = "SoundMesh $name", modifier = modifier, color = TextPrimary)
 }

@@ -6,7 +6,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -35,7 +34,8 @@ private val DarkColorScheme = darkColorScheme(
     onError = Color.White
 )
 
-private val LightColorScheme = darkColorScheme( // Keep audiophile dark palette preferred
+private val LightColorScheme = darkColorScheme(
+    // Audiophile dark palette preferred even when system is light
     primary = SonicCyanDark,
     onPrimary = Color.White,
     secondary = SecondaryBlue,
@@ -47,9 +47,9 @@ private val LightColorScheme = darkColorScheme( // Keep audiophile dark palette 
 )
 
 @Composable
-fun MyApplicationTheme(
-    darkTheme: Boolean = true, // Audiophile studio theme defaults to true for deep stage contrast
-    dynamicColor: Boolean = false, // Keep custom acoustic neon palette for distinctive branding
+fun SoundMeshTheme(
+    darkTheme: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -66,4 +66,14 @@ fun MyApplicationTheme(
         typography = Typography,
         content = content
     )
+}
+
+/** @deprecated Use [SoundMeshTheme] */
+@Composable
+fun MyApplicationTheme(
+    darkTheme: Boolean = true,
+    dynamicColor: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    SoundMeshTheme(darkTheme = darkTheme, dynamicColor = dynamicColor, content = content)
 }

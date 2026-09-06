@@ -34,8 +34,10 @@ class SoundMeshService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_START
-        val title = intent?.getStringExtra(EXTRA_TITLE) ?: "SoundMesh Active"
-        val status = intent?.getStringExtra(EXTRA_STATUS) ?: "Multi-speaker mesh streaming active"
+        val title = intent?.getStringExtra(EXTRA_TITLE)
+            ?: getString(R.string.notification_title_default)
+        val status = intent?.getStringExtra(EXTRA_STATUS)
+            ?: getString(R.string.notification_status_default)
 
         if (action == ACTION_STOP) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -46,14 +48,13 @@ class SoundMeshService : Service() {
         val notification = buildNotification(title, status)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val foregroundServiceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // Use mediaPlayback or mediaProjection based on mode
+            startForeground(
+                notificationId,
+                notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            }
-            startForeground(notificationId, notification, foregroundServiceType)
+            )
         } else {
+            @Suppress("DEPRECATION")
             startForeground(notificationId, notification)
         }
 
@@ -77,12 +78,17 @@ class SoundMeshService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Prefer adaptive launcher icon for the status bar; logo drawable is large art.
+        val smallIcon = R.mipmap.ic_launcher
+
         return NotificationCompat.Builder(this, channelId)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(R.drawable.ic_soundmesh_logo)
+            .setSmallIcon(smallIcon)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
@@ -91,10 +97,10 @@ class SoundMeshService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "SoundMesh Audio Stream",
+                getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps wireless speaker mesh active in background"
+                description = getString(R.string.notification_channel_desc)
                 setShowBadge(false)
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
