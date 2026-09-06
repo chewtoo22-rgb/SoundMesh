@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar" />
+    <style name="Theme.SoundMesh" parent="android:Theme.DeviceDefault.NoActionBar" />
+    <!-- Keep legacy alias so older references do not break mid-migration -->
+    <style name="Theme.MyApplication" parent="Theme.SoundMesh" />
 </resources>
