@@ -74,7 +74,10 @@ class SoundMeshViewModel(
         projectionCallback?.let { old?.unregisterCallback(it) }
         projectionCallback = null
         activeMediaProjection = null
-        old?.stop()
+        if (old != null) {
+            try { prepareForeground(AudioSourceType.PARTY_BEATS) } catch (_: Exception) {}
+            old.stop()
+        }
         _state.update { it.copy(isSystemCaptureActive = false) }
     }
 
@@ -162,6 +165,7 @@ class SoundMeshViewModel(
         val callback = object : MediaProjection.Callback() {
             override fun onStop() {
                 if (activeMediaProjection !== projection) return
+                projection.unregisterCallback(this)
                 audioCaptureManager?.stopCapture()
                 activeMediaProjection = null
                 projectionCallback = null

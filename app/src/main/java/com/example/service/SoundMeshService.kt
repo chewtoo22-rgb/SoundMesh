@@ -114,6 +114,7 @@ class SoundMeshService : Service(), ViewModelStoreOwner {
                 ?: error("Capture consent was unavailable")
             controller.setMediaProjection(projection)
         } catch (e: Exception) {
+            controller.releaseSystemCapture()
             controller.reportError("Cannot start capture: ${e.message}")
             prepareForeground(AudioSourceType.PARTY_BEATS)
         }

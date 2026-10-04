@@ -10,7 +10,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [34, 35, 36])
 class SoundMeshServiceTest {
     private class RecordingEngine : ViewModel() {
         var stopped = false
