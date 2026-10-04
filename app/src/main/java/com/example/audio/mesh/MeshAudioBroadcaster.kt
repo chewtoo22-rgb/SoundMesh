@@ -325,6 +325,12 @@ class MeshAudioBroadcaster(
         syncPingThread = Thread({
             while (isRunning.get()) {
                 try {
+                    val now = System.currentTimeMillis()
+                    registeredSpeakers.values.filter { now - it.lastSeenTimestamp > 8_000 }.forEach { expired ->
+                        registeredSpeakers.remove(expired.id)
+                        clockFilters.remove(expired.id)
+                        onSpeakerDiscovered(expired.copy(isConnected = false))
+                    }
                     val sessionBytes = MeshProtocol.packetWithUtf8Payload(MeshProtocol.TYPE_STREAM_SESSION, sessionId)
 
                     registeredSpeakers.values.forEach { speaker ->

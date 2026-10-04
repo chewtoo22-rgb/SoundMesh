@@ -106,14 +106,14 @@ fun AutoSyncEchoCard(
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = "ANTI-ECHO & CLOCK AUTO-SYNC",
+                            text = "NETWORK CLOCK & BUFFER SYNC",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (state.isSyncCalibrated) SonicEmerald else SonicAmber,
                             letterSpacing = 1.sp,
                             fontSize = 10.sp
                         )
                         Text(
-                            text = if (state.isSyncCalibrated) "Clocks Phase-Locked • Echo Eliminated" else "Echo Calibration Recommended",
+                            text = if (state.isSyncCalibrated) "Network Buffer Updated" else "Network Sync Available",
                             style = MaterialTheme.typography.titleMedium,
                             color = TextPrimary
                         )
@@ -128,7 +128,7 @@ fun AutoSyncEchoCard(
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = if (state.isSyncCalibrated) "CALIBRATED" else "DRIFT DETECTED",
+                        text = if (state.isSyncCalibrated) "BUFFER SET" else "NOT ADJUSTED",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (state.isSyncCalibrated) SonicEmerald else SonicAmber,
                         fontSize = 9.sp
@@ -166,7 +166,7 @@ fun AutoSyncEchoCard(
                         color = ObsidianCardElevated
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Phase-locking clocks...", fontSize = 13.sp)
+                    Text("Updating network timing...", fontSize = 13.sp)
                 } else {
                     Icon(
                         imageVector = Icons.Default.Refresh,

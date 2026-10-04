@@ -201,11 +201,11 @@ class SoundMeshViewModel(
             onSpeakerDiscovered = { speaker ->
                 viewModelScope.launch {
                     _state.update { current ->
-                        val existingList = current.connectedSpeakers.toMutableList()
+                        val existingList = current.connectedSpeakers.filter { it.isConnected && (speaker.isConnected || it.id != speaker.id) }.toMutableList()
                         val idx = existingList.indexOfFirst { it.id == speaker.id }
                         if (idx >= 0) {
                             existingList[idx] = speaker
-                        } else if (existingList.size < current.maxSpeakers) {
+                        } else if (speaker.isConnected && existingList.size < current.maxSpeakers) {
                             existingList.add(speaker)
                         }
                         current.copy(connectedSpeakers = existingList)

@@ -23,12 +23,23 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: gradle
+      - name: Restore test signing key
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: soundmesh-test-signing-v1
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: Preserve test signing key
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: soundmesh-test-signing-v1
       - name: Name test APK
         run: cp app/build/outputs/apk/debug/app-debug.apk SoundMesh-1.1-test.apk
       - name: Upload debug APK

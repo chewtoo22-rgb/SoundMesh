@@ -64,7 +64,7 @@ Open the app → choose **Master** or **Speaker** in the top bar.
 - **Master**: pick audio source, grant capture if needed, start playback; speakers appear as they connect.
 - **Speaker**: connect to master IP (or use discovery/pairing UI), set channel/zone/volume/trim.
 
-CI requires unit tests to pass before assembling or publishing an APK. Test branches publish prerelease APKs. Install the same build on all phones; stop the mesh from the notification when finished.
+CI requires unit tests to pass before assembling or publishing an APK. Test branches publish prerelease APKs. The debug APK installs as **SoundMesh Test** alongside the existing app. Install the same build on all phones and stop older SoundMesh sessions first. Stop the mesh from the notification when finished. See [device test checklist](docs/TESTING.md).
 
 ---
 

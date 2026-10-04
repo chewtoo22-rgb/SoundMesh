@@ -34,6 +34,7 @@ android {
   }
 
   buildTypes {
+    debug { applicationIdSuffix = ".test" }
     release {
       isCrunchPngs = false
       isMinifyEnabled = false

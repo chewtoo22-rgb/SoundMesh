@@ -13,6 +13,7 @@ import com.example.audio.mesh.MeshProtocol
 import com.example.model.AudioSourceType
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.math.sqrt
 
@@ -21,6 +22,7 @@ class SystemAudioCaptureManager(
     private val onError: (String) -> Unit
 ) {
     @Volatile private var isRecording = false
+    private val generation = AtomicLong(0)
     private var captureThread: Thread? = null
     private var audioRecord: AudioRecord? = null
 
@@ -30,6 +32,7 @@ class SystemAudioCaptureManager(
         mediaProjection: MediaProjection? = null
     ) {
         stopCapture()
+        val captureGeneration = generation.get()
 
         val sampleRate = MeshProtocol.SAMPLE_RATE
         val channelConfig = AudioFormat.CHANNEL_IN_STEREO
@@ -90,8 +93,10 @@ class SystemAudioCaptureManager(
                 val tempBuffer = ByteArray(MeshProtocol.AUDIO_PAYLOAD_SIZE)
                 val byteBuffer = ByteBuffer.wrap(tempBuffer).order(ByteOrder.LITTLE_ENDIAN)
 
-                while (isRecording) {
-                    val bytesRead = record.read(tempBuffer, 0, tempBuffer.size)
+                while (isRecording && generation.get() == captureGeneration) {
+                    val bytesRead = try { record.read(tempBuffer, 0, tempBuffer.size) }
+                        catch (_: IllegalStateException) { AudioRecord.ERROR_INVALID_OPERATION }
+                    if (generation.get() != captureGeneration) break
                     if (bytesRead > 0) {
                         // Calculate RMS level and 8 frequency-like energy bands for visualizer
                         var sumSquares = 0.0
@@ -127,6 +132,7 @@ class SystemAudioCaptureManager(
     @Synchronized
     fun stopCapture() {
         isRecording = false
+        generation.incrementAndGet()
         val record = audioRecord
         audioRecord = null
         // Stop unblocks a blocking read; interrupt alone does not stop AudioRecord.
