@@ -24,6 +24,9 @@ android {
   }
 
   signingConfigs {
+    getByName("debug") {
+      System.getenv("SOUNDMESH_TEST_KEYSTORE_PATH")?.let { storeFile = file(it) }
+    }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)

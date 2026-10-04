@@ -26,3 +26,6 @@ app/release/
 # Secrets / local overrides
 google-services.json
 app/google-services.json
+
+# CI-generated debug key is cached, never committed
+.android-test/

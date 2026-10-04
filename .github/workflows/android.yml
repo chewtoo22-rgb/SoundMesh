@@ -14,6 +14,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SOUNDMESH_TEST_KEYSTORE_PATH: ${{ github.workspace }}/.android-test/debug.keystore
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,8 +28,14 @@ jobs:
       - name: Restore test signing key
         uses: actions/cache/restore@v4
         with:
-          path: ~/.android/debug.keystore
+          path: .android-test/debug.keystore
           key: soundmesh-test-signing-v1
+      - name: Prepare test signing key
+        run: |
+          mkdir -p .android-test
+          if [ ! -f "$SOUNDMESH_TEST_KEYSTORE_PATH" ]; then
+            keytool -genkeypair -keystore "$SOUNDMESH_TEST_KEYSTORE_PATH" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=SoundMesh Test,O=SoundMesh,C=US" -noprompt
+          fi
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       - name: Unit tests
@@ -38,7 +46,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/cache/save@v4
         with:
-          path: ~/.android/debug.keystore
+          path: .android-test/debug.keystore
           key: soundmesh-test-signing-v1
       - name: Name test APK
         run: cp app/build/outputs/apk/debug/app-debug.apk SoundMesh-1.1-test.apk
