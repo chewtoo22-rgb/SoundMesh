@@ -17,7 +17,7 @@ Turn up to **10 Android phones** into a synchronized, low-latency wireless multi
 | **DSP** | 5-band EQ with presets, audio profiles (Party Wall, 5.1, Bass Blast, Vocal, Wide Stage) |
 | **Quality** | 44.1 kHz PCM streaming paths, bandwidth-aware modes |
 | **UI** | Dark “obsidian” audiophile theme, live visualizer, per-speaker cards, pairing flow |
-| **Background** | Foreground service keeps the mesh alive while the screen is off |
+| **Background** | Service-owned engines keep streaming across screen/activity recreation; capture revocation is reported |
 
 ---
 
@@ -25,7 +25,7 @@ Turn up to **10 Android phones** into a synchronized, low-latency wireless multi
 
 1. **Master phone** captures or generates audio and broadcasts over Wi‑Fi (UDP mesh protocol).
 2. **Speaker phones** discover / connect to the master, receive PCM frames, apply local volume / channel / EQ / latency trim, and play in sync.
-3. Shared clock + delay offset + optional calibration pulse reduce echo and drift across devices on the same network (ideally the same Wi‑Fi or hotspot).
+3. A four-timestamp clock handshake estimates device clock offset, with a low-jitter sample filter and per-speaker delay trim. Auto-Sync adjusts the network buffer; speaker hardware and Bluetooth output delay require listening tests and manual trim.
 
 > Best results: same 5 GHz Wi‑Fi or phone hotspot, devices reasonably close, Balanced or Rock-Solid latency mode for media.
 
@@ -35,9 +35,9 @@ Wire format details: **[docs/PROTOCOL.md](docs/PROTOCOL.md)**.
 
 ## Requirements
 
-- Android **8.0+** (API 24+); target SDK 36
+- Android **7.0+** (API 24+); target SDK 36
 - Wi‑Fi (or hotspot) between devices
-- For system audio capture: user grants **MediaProjection** (screen/audio capture) permission
+- For system audio capture: Android **10+**, audio permission and **MediaProjection** consent; the source app must permit playback capture
 - Mic permission for live party mic mode
 - Notification permission (Android 13+) for the foreground service
 
@@ -64,7 +64,7 @@ Open the app → choose **Master** or **Speaker** in the top bar.
 - **Master**: pick audio source, grant capture if needed, start playback; speakers appear as they connect.
 - **Speaker**: connect to master IP (or use discovery/pairing UI), set channel/zone/volume/trim.
 
-CI builds a debug APK on every push to `main` (see **Actions** → Android CI).
+CI requires unit tests to pass before assembling or publishing an APK. Test branches publish prerelease APKs. Install the same build on all phones; stop the mesh from the notification when finished.
 
 ---
 

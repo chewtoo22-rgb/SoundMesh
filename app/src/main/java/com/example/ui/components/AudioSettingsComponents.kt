@@ -138,7 +138,7 @@ fun AutoSyncEchoCard(
 
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = "Aligns high-precision presentation timestamps (PTS) across all ${state.connectedSpeakers.size} phones to eliminate echo and acoustic comb filtering.",
+                text = "Measures Wi-Fi clock timing across ${state.connectedSpeakers.size} phones. Use speaker delay trim to compensate for device or Bluetooth output delay.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 fontSize = 11.sp

@@ -19,6 +19,8 @@ import java.net.InetAddress
 import java.net.MulticastSocket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -34,6 +36,9 @@ class MeshAudioBroadcaster(
     private val isRunning = AtomicBoolean(false)
     private val isPlaying = AtomicBoolean(false)
     private val sequenceNumber = AtomicLong(0)
+    private val pingSequence = AtomicLong(0)
+    private val sessionId = UUID.randomUUID().toString()
+    private val clockFilters = ConcurrentHashMap<String, ClockSync.Filter>()
 
     private var broadcastSocket: DatagramSocket? = null
     private var multicastSocket: MulticastSocket? = null
@@ -110,6 +115,8 @@ class MeshAudioBroadcaster(
             Log.i("MeshBroadcaster", "Mesh Broadcaster started with Low-Latency DSP Engine")
         } catch (e: Exception) {
             Log.e("MeshBroadcaster", "Failed to start broadcaster", e)
+            stop()
+            throw IllegalStateException("Unable to start Wi-Fi broadcaster: ${e.message}", e)
         }
     }
 
@@ -132,10 +139,11 @@ class MeshAudioBroadcaster(
     private fun startSyntheticAudioLoop() {
         audioLoopThread = Thread({
             val pcmBuffer = ByteArray(MeshProtocol.AUDIO_PAYLOAD_SIZE)
-            val frameDurationMs = (MeshProtocol.SAMPLES_PER_FRAME * 1000L) / MeshProtocol.SAMPLE_RATE
+            val frameDurationNanos = MeshProtocol.SAMPLES_PER_FRAME * 1_000_000_000L / MeshProtocol.SAMPLE_RATE
+            var nextFrame = System.nanoTime()
 
             while (isRunning.get()) {
-                val loopStartTime = System.currentTimeMillis()
+                nextFrame += frameDurationNanos
 
                 if (isPlaying.get() && activeAudioSource == AudioSourceType.PARTY_BEATS) {
                     synthGenerator.generatePcmFrame(pcmBuffer, 0, pcmBuffer.size)
@@ -158,14 +166,12 @@ class MeshAudioBroadcaster(
                     broadcastPcmFrame(pcmBuffer, pcmBuffer.size)
                 }
 
-                val elapsed = System.currentTimeMillis() - loopStartTime
-                val sleepTime = frameDurationMs - elapsed
-                if (sleepTime > 0) {
-                    try {
-                        Thread.sleep(sleepTime)
-                    } catch (_: InterruptedException) {
-                        break
-                    }
+                val remaining = nextFrame - System.nanoTime()
+                if (remaining > 0) {
+                    try { TimeUnit.NANOSECONDS.sleep(remaining) }
+                    catch (_: InterruptedException) { break }
+                } else if (remaining < -frameDurationNanos * 2) {
+                    nextFrame = System.nanoTime() // Do not burst old frames after a stall.
                 }
             }
         }, "SoundMesh-MasterAudioLoop").apply { start() }
@@ -217,7 +223,7 @@ class MeshAudioBroadcaster(
                         if (magic1 == MeshProtocol.MAGIC_BYTE_1 && magic2 == MeshProtocol.MAGIC_BYTE_2) {
                             val type = byteBuf.get()
                             byteBuf.get()
-                            byteBuf.getLong()
+                            val packetSequence = byteBuf.getLong()
                             val packetTimestampNanos = byteBuf.getLong()
                             val payloadLen = byteBuf.getShort().toInt()
                             if (payloadLen < 0 || payloadLen > byteBuf.remaining()) continue
@@ -279,14 +285,30 @@ class MeshAudioBroadcaster(
                                 }
 
                                 MeshProtocol.TYPE_SYNC_PONG -> {
-                                    val now = System.nanoTime()
-                                    val rttNanos = (now - packetTimestampNanos).coerceAtLeast(0L)
-                                    val speakerId = String(payloadBytes, Charsets.UTF_8)
-                                    val latencyMs = (rttNanos / 2_000_000L).coerceAtLeast(1)
-                                    registeredSpeakers[speakerId]?.let { spk ->
-                                        registeredSpeakers[speakerId] = spk.copy(latencyMs = latencyMs)
-                                        onSpeakerLatencyUpdated(speakerId, latencyMs)
+                                    val masterReceive = System.nanoTime()
+                                    val parts = String(payloadBytes, Charsets.UTF_8).split("|")
+                                    val speakerId = parts[0]
+                                    val speaker = registeredSpeakers[speakerId] ?: continue
+                                    if (speaker.ipAddress != packet.address.hostAddress) continue
+                                    val receive = parts.getOrNull(1)?.toLongOrNull()
+                                    val send = parts.getOrNull(2)?.toLongOrNull()
+                                    val sample = if (receive != null && send != null) {
+                                        ClockSync.measure(packetTimestampNanos, receive, send, masterReceive)
+                                    } else null
+                                    if (sample != null) {
+                                        val best = clockFilters.getOrPut(speakerId) { ClockSync.Filter() }.add(sample)
+                                        val reply = MeshProtocol.packetWithUtf8Payload(
+                                            MeshProtocol.TYPE_CLOCK_SYNC,
+                                            "$speakerId|${best.masterMinusSpeakerNanos}|${best.roundTripNanos}",
+                                            seq = packetSequence
+                                        )
+                                        broadcastSocket?.send(DatagramPacket(reply, reply.size, packet.address, speaker.port))
                                     }
+                                    val rtt = sample?.roundTripNanos ?: (masterReceive - packetTimestampNanos)
+                                    if (rtt !in 0L..1_000_000_000L) continue
+                                    val latencyMs = (rtt / 2_000_000L).coerceAtLeast(1)
+                                    registeredSpeakers[speakerId] = speaker.copy(latencyMs = latencyMs)
+                                    onSpeakerLatencyUpdated(speakerId, latencyMs)
                                 }
                             }
                         }
@@ -303,19 +325,14 @@ class MeshAudioBroadcaster(
         syncPingThread = Thread({
             while (isRunning.get()) {
                 try {
-                    val pingBuffer = ByteBuffer.allocate(MeshProtocol.HEADER_SIZE).order(ByteOrder.BIG_ENDIAN)
-                    pingBuffer.put(MeshProtocol.MAGIC_BYTE_1)
-                    pingBuffer.put(MeshProtocol.MAGIC_BYTE_2)
-                    pingBuffer.put(MeshProtocol.TYPE_SYNC_PING)
-                    pingBuffer.put(0.toByte())
-                    pingBuffer.putLong(0L)
-                    pingBuffer.putLong(System.nanoTime())
-                    pingBuffer.putShort(0.toShort())
-                    val pingBytes = pingBuffer.array()
+                    val sessionBytes = MeshProtocol.packetWithUtf8Payload(MeshProtocol.TYPE_STREAM_SESSION, sessionId)
 
                     registeredSpeakers.values.forEach { speaker ->
                         try {
                             val ip = InetAddress.getByName(speaker.ipAddress)
+                            broadcastSocket?.send(DatagramPacket(sessionBytes, sessionBytes.size, ip, speaker.port))
+                            val pingBytes = MeshProtocol.packetWithUtf8Payload(
+                                MeshProtocol.TYPE_SYNC_PING, "", seq = pingSequence.incrementAndGet())
                             val packet = DatagramPacket(pingBytes, pingBytes.size, ip, speaker.port)
                             broadcastSocket?.send(packet)
                         } catch (_: Exception) {}
@@ -396,8 +413,7 @@ class MeshAudioBroadcaster(
         val calculatedDelay = (maxRttLatency.toInt() + headroom).coerceIn(16, 250)
         syncDelayOffsetMs = calculatedDelay
 
-        val targetPlayNanoTime = System.nanoTime() + (syncDelayOffsetMs * 1_000_000L)
-        val alignPacketBytes = MeshProtocol.createAutoSyncPacket(targetPlayNanoTime, syncDelayOffsetMs)
+        val alignPacketBytes = MeshProtocol.createAutoSyncPacket(System.nanoTime(), syncDelayOffsetMs)
 
         Thread({
             try {

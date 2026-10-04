@@ -1,6 +1,11 @@
 package com.example.viewmodel
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
+import androidx.core.content.ContextCompat
 import android.content.Context
 import android.media.projection.MediaProjection
 import android.net.wifi.WifiManager
@@ -37,7 +42,11 @@ import java.net.InetAddress
 import java.net.NetworkInterface
 import java.util.UUID
 
-class SoundMeshViewModel(application: Application) : AndroidViewModel(application) {
+// Owned by SoundMeshService's ViewModelStore, never by the Activity.
+class SoundMeshViewModel(
+    application: Application,
+    private val prepareForeground: (AudioSourceType) -> Unit = {}
+) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(MeshState())
     val state: StateFlow<MeshState> = _state.asStateFlow()
@@ -47,11 +56,50 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
     private var audioCaptureManager: SystemAudioCaptureManager? = null
 
     private var activeMediaProjection: MediaProjection? = null
+    private var projectionCallback: MediaProjection.Callback? = null
+
+    fun reportError(message: String) {
+        _state.update { it.copy(statusMessage = message) }
+    }
+
+    private fun stopCaptureWithError(message: String) {
+        audioCaptureManager?.stopCapture()
+        broadcaster?.setPlaying(false)
+        _state.update { it.copy(isPlaying = false, statusMessage = message) }
+    }
+
+    fun releaseSystemCapture() {
+        audioCaptureManager?.stopCapture()
+        val old = activeMediaProjection
+        projectionCallback?.let { old?.unregisterCallback(it) }
+        projectionCallback = null
+        activeMediaProjection = null
+        old?.stop()
+        _state.update { it.copy(isSystemCaptureActive = false) }
+    }
+
+    fun stopMesh() {
+        releaseSystemCapture()
+        broadcaster?.stop()
+        broadcaster = null
+        receiver?.stop()
+        receiver = null
+        _state.update { it.copy(isAudioEngineRunning = false, isPlaying = false,
+            isConnectedToMaster = false, connectedSpeakers = emptyList(), statusMessage = "SoundMesh stopped") }
+    }
+
+    fun restartMesh() {
+        if (_state.value.isAudioEngineRunning) return
+        try {
+            prepareForeground(AudioSourceType.PARTY_BEATS)
+            if (_state.value.role == DeviceRole.MASTER) setupMasterMode() else setupSpeakerMode()
+        } catch (e: Exception) { reportError("Unable to start SoundMesh: ${e.message}") }
+    }
 
     init {
         detectLocalIpAddress()
         startLocalTelemetryLoop()
-        setupMasterMode()
+        restartMesh()
     }
 
     private fun startLocalTelemetryLoop() {
@@ -111,20 +159,35 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setMediaProjection(projection: MediaProjection) {
         activeMediaProjection = projection
-        _state.update { it.copy(isSystemCaptureActive = true, statusMessage = "Capturing System Audio") }
-
-        if (_state.value.role == DeviceRole.MASTER && _state.value.audioSource == AudioSourceType.SYSTEM_AUDIO) {
-            startSystemCapture()
+        val callback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                if (activeMediaProjection !== projection) return
+                audioCaptureManager?.stopCapture()
+                activeMediaProjection = null
+                projectionCallback = null
+                broadcaster?.setPlaying(false)
+                _state.update { it.copy(isSystemCaptureActive = false, isPlaying = false,
+                    statusMessage = "Capture access ended. Tap Grant Access to resume.") }
+                try { prepareForeground(AudioSourceType.PARTY_BEATS) } catch (_: Exception) {}
+            }
         }
+        projectionCallback = callback
+        projection.registerCallback(callback, Handler(Looper.getMainLooper()))
+        _state.update { it.copy(isSystemCaptureActive = true, statusMessage = "Capture access granted. Press Play.") }
+        if (_state.value.role == DeviceRole.MASTER && _state.value.isPlaying &&
+            _state.value.audioSource == AudioSourceType.SYSTEM_AUDIO) startSystemCapture()
     }
 
     fun selectRole(role: DeviceRole) {
-        if (_state.value.role == role) return
-
-        if (role == DeviceRole.MASTER) {
-            setupMasterMode()
-        } else {
-            setupSpeakerMode()
+        if (_state.value.role == role && _state.value.isAudioEngineRunning) return
+        releaseSystemCapture()
+        audioCaptureManager?.stopCapture()
+        _state.update { it.copy(isPlaying = false, isSystemCaptureActive = false, isSyncCalibrated = false) }
+        try {
+            prepareForeground(AudioSourceType.PARTY_BEATS)
+            if (role == DeviceRole.MASTER) setupMasterMode() else setupSpeakerMode()
+        } catch (e: Exception) {
+            _state.update { it.copy(isAudioEngineRunning = false, statusMessage = "Role change failed: ${e.message}") }
         }
     }
 
@@ -195,6 +258,10 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
         receiver?.stop()
         receiver = MeshAudioReceiver(
             context = getApplication(),
+            onDisconnectedFromMaster = {
+                _state.update { it.copy(isConnectedToMaster = false,
+                    statusMessage = "Master unavailable. Waiting to reconnect...") }
+            },
             onConnectedToMaster = { masterIp ->
                 viewModelScope.launch {
                     _state.update {
@@ -259,6 +326,8 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun togglePlay() {
+        restartMesh()
+        if (!_state.value.isAudioEngineRunning) return
         val newPlayState = !_state.value.isPlaying
         _state.update { it.copy(isPlaying = newPlayState) }
 
@@ -268,10 +337,16 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
             when (_state.value.audioSource) {
                 AudioSourceType.SYSTEM_AUDIO -> startSystemCapture()
                 AudioSourceType.PARTY_MIC -> startMicCapture()
-                AudioSourceType.PARTY_BEATS -> audioCaptureManager?.stopCapture()
+                AudioSourceType.PARTY_BEATS -> {
+                    audioCaptureManager?.stopCapture()
+                    try { prepareForeground(AudioSourceType.PARTY_BEATS) } catch (e: Exception) { stopCaptureWithError(e.message ?: "Service unavailable") }
+                }
             }
         } else {
             audioCaptureManager?.stopCapture()
+            if (activeMediaProjection == null) {
+                try { prepareForeground(AudioSourceType.PARTY_BEATS) } catch (_: Exception) {}
+            }
         }
     }
 
@@ -287,6 +362,11 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun selectAudioSource(source: AudioSourceType) {
+        audioCaptureManager?.stopCapture()
+        if (source != AudioSourceType.SYSTEM_AUDIO) releaseSystemCapture()
+        if (!_state.value.isPlaying) {
+            try { prepareForeground(AudioSourceType.PARTY_BEATS) } catch (_: Exception) {}
+        }
         val (title, artist) = when (source) {
             AudioSourceType.SYSTEM_AUDIO -> Pair("Spotify / System Audio Capture", "All Apps Media (44.1 kHz PCM)")
             AudioSourceType.PARTY_BEATS -> Pair("Synthesizer & Party Beats", "Algorithmic DSP Beats")
@@ -307,7 +387,10 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
             when (source) {
                 AudioSourceType.SYSTEM_AUDIO -> startSystemCapture()
                 AudioSourceType.PARTY_MIC -> startMicCapture()
-                AudioSourceType.PARTY_BEATS -> audioCaptureManager?.stopCapture()
+                AudioSourceType.PARTY_BEATS -> {
+                    audioCaptureManager?.stopCapture()
+                    try { prepareForeground(AudioSourceType.PARTY_BEATS) } catch (e: Exception) { stopCaptureWithError(e.message ?: "Service unavailable") }
+                }
             }
         }
     }
@@ -331,9 +414,15 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
     private fun startSystemCapture() {
         val projection = activeMediaProjection
         if (projection == null) {
-            _state.update { it.copy(statusMessage = "Tap 'Grant Access' for System Audio capture") }
+            stopCaptureWithError("Tap Grant Access for System Audio capture")
             return
         }
+        if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            stopCaptureWithError("Microphone/audio permission is required for capture. Enable it in app settings.")
+            return
+        }
+        try { prepareForeground(AudioSourceType.SYSTEM_AUDIO) }
+        catch (e: Exception) { stopCaptureWithError("Cannot start background capture: ${e.message}"); return }
 
         audioCaptureManager?.stopCapture()
         audioCaptureManager = SystemAudioCaptureManager(
@@ -342,13 +431,19 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
                 _state.update { it.copy(liveRmsLevel = rms, liveFrequencyBands = bands) }
             },
             onError = { msg ->
-                _state.update { it.copy(statusMessage = msg) }
+                Handler(Looper.getMainLooper()).post { stopCaptureWithError(msg) }
             }
         )
         audioCaptureManager?.startCapture(AudioSourceType.SYSTEM_AUDIO, projection)
     }
 
     private fun startMicCapture() {
+        if (ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            stopCaptureWithError("Microphone permission is required. Enable it in app settings.")
+            return
+        }
+        try { prepareForeground(AudioSourceType.PARTY_MIC) }
+        catch (e: Exception) { stopCaptureWithError("Cannot start background microphone: ${e.message}"); return }
         audioCaptureManager?.stopCapture()
         audioCaptureManager = SystemAudioCaptureManager(
             onPcmData = { data, len, rms, bands ->
@@ -356,7 +451,7 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
                 _state.update { it.copy(liveRmsLevel = rms, liveFrequencyBands = bands) }
             },
             onError = { msg ->
-                _state.update { it.copy(statusMessage = msg) }
+                Handler(Looper.getMainLooper()).post { stopCaptureWithError(msg) }
             }
         )
         audioCaptureManager?.startCapture(AudioSourceType.PARTY_MIC)
@@ -367,14 +462,14 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
         broadcaster?.syncDelayOffsetMs = offsetMs
     }
 
-    /**
-     * Auto-Sync: Measures round-trip ping and clock drift across all connected speaker phones,
-     * calculates the optimal jitter delay headroom, and aligns all playback presentation clocks
-     * to eliminate echoes.
-     */
+    /** Adjust network jitter headroom; acoustic/Bluetooth delay still requires local trim. */
     fun triggerAutoSyncCalibration() {
+        if (_state.value.connectedSpeakers.none { it.isConnected }) {
+            reportError("Connect a speaker before running Auto-Sync")
+            return
+        }
         viewModelScope.launch {
-            _state.update { it.copy(isAutoSyncing = true, statusMessage = "Aligning all speaker clocks & eliminating echo...") }
+            _state.update { it.copy(isAutoSyncing = true, statusMessage = "Measuring Wi-Fi timing and adjusting playback buffer...") }
             val calibratedDelay = broadcaster?.calibrateAndAlignAllSpeakers() ?: _state.value.syncDelayOffsetMs
             kotlinx.coroutines.delay(400) // Brief animation delay for feedback
             _state.update {
@@ -382,7 +477,7 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
                     isAutoSyncing = false,
                     isSyncCalibrated = true,
                     syncDelayOffsetMs = calibratedDelay,
-                    statusMessage = "All ${it.connectedSpeakers.size} phones phase-locked & echo-calibrated ($calibratedDelay ms)"
+                    statusMessage = "Network timing updated ($calibratedDelay ms). Use delay trim for remaining speaker echo."
                 )
             }
         }
@@ -765,10 +860,7 @@ class SoundMeshViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     override fun onCleared() {
+        stopMesh()
         super.onCleared()
-        broadcaster?.stop()
-        receiver?.stop()
-        audioCaptureManager?.stopCapture()
-        activeMediaProjection?.stop()
     }
 }
