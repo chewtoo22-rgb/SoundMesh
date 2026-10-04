@@ -13,6 +13,7 @@ import com.example.audio.mesh.MeshProtocol
 import com.example.model.AudioSourceType
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.math.sqrt
 
@@ -20,7 +21,8 @@ class SystemAudioCaptureManager(
     private val onPcmData: (ByteArray, Int, Float, List<Float>) -> Unit,
     private val onError: (String) -> Unit
 ) {
-    private var isRecording = false
+    @Volatile private var isRecording = false
+    private val generation = AtomicLong(0)
     private var captureThread: Thread? = null
     private var audioRecord: AudioRecord? = null
 
@@ -30,6 +32,7 @@ class SystemAudioCaptureManager(
         mediaProjection: MediaProjection? = null
     ) {
         stopCapture()
+        val captureGeneration = generation.get()
 
         val sampleRate = MeshProtocol.SAMPLE_RATE
         val channelConfig = AudioFormat.CHANNEL_IN_STEREO
@@ -82,15 +85,18 @@ class SystemAudioCaptureManager(
                 return
             }
 
-            audioRecord?.startRecording()
+            val record = audioRecord ?: return
+            record.startRecording()
             isRecording = true
 
             captureThread = Thread({
                 val tempBuffer = ByteArray(MeshProtocol.AUDIO_PAYLOAD_SIZE)
                 val byteBuffer = ByteBuffer.wrap(tempBuffer).order(ByteOrder.LITTLE_ENDIAN)
 
-                while (isRecording) {
-                    val bytesRead = audioRecord?.read(tempBuffer, 0, tempBuffer.size) ?: -1
+                while (isRecording && generation.get() == captureGeneration) {
+                    val bytesRead = try { record.read(tempBuffer, 0, tempBuffer.size) }
+                        catch (_: IllegalStateException) { AudioRecord.ERROR_INVALID_OPERATION }
+                    if (generation.get() != captureGeneration) break
                     if (bytesRead > 0) {
                         // Calculate RMS level and 8 frequency-like energy bands for visualizer
                         var sumSquares = 0.0
@@ -109,9 +115,9 @@ class SystemAudioCaptureManager(
                         val bands = bandEnergies.map { (it / (samples / 8f)).coerceIn(0.05f, 1f) }
 
                         onPcmData(tempBuffer, bytesRead, rms, bands)
-                    } else if (bytesRead < 0) {
-                        Log.w("AudioCapture", "Error reading audio: $bytesRead")
-                        Thread.sleep(10)
+                    } else if (bytesRead < 0 && isRecording) {
+                        isRecording = false
+                        onError("Audio capture ended ($bytesRead). Grant access again to resume.")
                     }
                 }
             }, "SoundMesh-AudioCaptureThread").apply { start() }
@@ -123,22 +129,20 @@ class SystemAudioCaptureManager(
         }
     }
 
+    @Synchronized
     fun stopCapture() {
         isRecording = false
-        try {
-            captureThread?.interrupt()
-            captureThread?.join(300)
-            captureThread = null
-        } catch (_: Exception) {}
-
-        try {
-            if (audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                audioRecord?.stop()
-            }
-            audioRecord?.release()
-            audioRecord = null
-        } catch (e: Exception) {
-            Log.e("AudioCapture", "Error releasing audio record", e)
+        generation.incrementAndGet()
+        val record = audioRecord
+        audioRecord = null
+        // Stop unblocks a blocking read; interrupt alone does not stop AudioRecord.
+        try { record?.stop() } catch (_: Exception) {}
+        val thread = captureThread
+        captureThread = null
+        thread?.interrupt()
+        if (thread != null && thread !== Thread.currentThread()) {
+            try { thread.join(1000) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
         }
+        try { record?.release() } catch (e: Exception) { Log.w("AudioCapture", "Release failed", e) }
     }
 }

@@ -3,6 +3,10 @@ package com.example
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.ComponentName
+import android.content.ServiceConnection
+import android.os.IBinder
+import androidx.compose.material3.Button
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
@@ -13,7 +17,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -73,7 +76,22 @@ import com.example.viewmodel.SoundMeshViewModel
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: SoundMeshViewModel by viewModels()
+    private lateinit var viewModel: SoundMeshViewModel
+    private var meshService: SoundMeshService? = null
+    private var isBound = false
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val service = (binder as SoundMeshService.LocalBinder).getService()
+            meshService = service
+            viewModel = service.controller
+            viewModel.restartMesh()
+            renderMesh()
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            meshService = null
+            showServiceError("SoundMesh service disconnected. Reopen the app to reconnect.")
+        }
+    }
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
     private lateinit var permissionsLauncher: ActivityResultLauncher<Array<String>>
 
@@ -85,12 +103,9 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                val projectionManager =
-                    getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                val projection = projectionManager.getMediaProjection(result.resultCode, result.data!!)
-                if (projection != null) {
-                    viewModel.setMediaProjection(projection)
-                }
+                meshService?.beginSystemCapture(result.resultCode, result.data!!)
+            } else if (::viewModel.isInitialized) {
+                viewModel.reportError("Capture access was not granted")
             }
         }
 
@@ -99,8 +114,17 @@ class MainActivity : ComponentActivity() {
         ) { /* results handled implicitly; engine checks grants at use-time */ }
 
         requestAppPermissions()
-        startMeshForegroundService()
+        setContent { SoundMeshTheme { Text("Connecting to SoundMesh...") } }
+        try {
+            ContextCompat.startForegroundService(this, Intent(this, SoundMeshService::class.java).apply {
+                action = SoundMeshService.ACTION_START
+            })
+            isBound = bindService(Intent(this, SoundMeshService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
+            if (!isBound) showServiceError("Unable to connect to SoundMesh service")
+        } catch (e: Exception) { showServiceError("Unable to start SoundMesh: ${e.message}") }
+    }
 
+    private fun renderMesh() {
         setContent {
             SoundMeshTheme {
                 val state by viewModel.state.collectAsState()
@@ -124,7 +148,12 @@ class MainActivity : ComponentActivity() {
                             .fillMaxSize()
                             .padding(innerPadding)
                     ) {
-                        if (state.role == DeviceRole.MASTER) {
+                        if (!state.isAudioEngineRunning) {
+                            Column(Modifier.padding(24.dp)) {
+                                Text(state.statusMessage, color = TextPrimary)
+                                Button(onClick = { viewModel.restartMesh() }) { Text("Start SoundMesh") }
+                            }
+                        } else if (state.role == DeviceRole.MASTER) {
                             MasterControllerScreen(
                                 state = state,
                                 onTogglePlay = { viewModel.togglePlay() },
@@ -190,30 +219,35 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchSystemAudioCapture() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            viewModel.reportError("System audio capture requires Android 10 or newer. Try Party Beats or Microphone.")
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            viewModel.reportError("Grant microphone/audio permission in app settings before capturing")
+            requestAppPermissions()
+            return
+        }
         try {
             val projectionManager =
                 getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
-        } catch (_: Exception) {
-            // Capture unavailable on this device / OEM restriction
+        } catch (e: Exception) {
+            viewModel.reportError("Capture unavailable: ${e.message}")
         }
     }
 
-    private fun startMeshForegroundService() {
-        try {
-            val intent = Intent(this, SoundMeshService::class.java).apply {
-                action = SoundMeshService.ACTION_START
-                putExtra(SoundMeshService.EXTRA_TITLE, getString(R.string.app_name))
-                putExtra(
-                    SoundMeshService.EXTRA_STATUS,
-                    getString(R.string.notification_status_default)
-                )
-            }
-            ContextCompat.startForegroundService(this, intent)
-        } catch (_: Exception) {
-            // Service start can fail if FGS type restrictions apply; UI still works
-        }
+    private fun showServiceError(message: String) {
+        setContent { SoundMeshTheme { Text(message, color = TextPrimary, modifier = Modifier.padding(24.dp)) } }
     }
+
+    override fun onDestroy() {
+        if (isBound) unbindService(serviceConnection)
+        isBound = false
+        meshService = null
+        super.onDestroy()
+    }
+
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

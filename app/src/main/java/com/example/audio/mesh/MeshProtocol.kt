@@ -37,6 +37,8 @@ object MeshProtocol {
     const val TYPE_CONFIG_UPDATE: Byte = 0x0A
     const val TYPE_MASTER_STATS: Byte = 0x0B
     const val TYPE_SPEAKER_TUNING_UPDATE: Byte = 0x0C
+    const val TYPE_CLOCK_SYNC: Byte = 0x0D
+    const val TYPE_STREAM_SESSION: Byte = 0x0E
 
     const val SAMPLE_RATE = 44100
     const val CHANNELS = 2
@@ -78,7 +80,7 @@ object MeshProtocol {
         return buffer
     }
 
-    private fun packetWithUtf8Payload(
+    fun packetWithUtf8Payload(
         type: Byte,
         payload: String,
         seq: Long = 0L,
@@ -92,7 +94,7 @@ object MeshProtocol {
 
     /** Returns null if the buffer is too short or magic does not match. */
     fun parseHeader(data: ByteArray, offset: Int = 0): Header? {
-        if (data.size - offset < HEADER_SIZE) return null
+        if (offset < 0 || offset > data.size || data.size - offset < HEADER_SIZE) return null
         if (data[offset] != MAGIC_BYTE_1 || data[offset + 1] != MAGIC_BYTE_2) return null
         val buffer = ByteBuffer.wrap(data, offset, data.size - offset).order(ByteOrder.BIG_ENDIAN)
         buffer.position(offset + 2)
@@ -107,7 +109,7 @@ object MeshProtocol {
     }
 
     fun isValidMagic(data: ByteArray, offset: Int = 0): Boolean {
-        return data.size - offset >= 2 &&
+        return offset >= 0 && offset <= data.size && data.size - offset >= 2 &&
             data[offset] == MAGIC_BYTE_1 &&
             data[offset + 1] == MAGIC_BYTE_2
     }
@@ -125,11 +127,11 @@ object MeshProtocol {
         return buffer.array()
     }
 
-    fun createAutoSyncPacket(targetPlayNanoTime: Long, delayOffsetMs: Int): ByteArray {
+    fun createAutoSyncPacket(masterSendNanoTime: Long, delayOffsetMs: Int): ByteArray {
         return packetWithUtf8Payload(
             type = TYPE_AUTO_SYNC_ALIGN,
-            payload = "$targetPlayNanoTime|$delayOffsetMs",
-            timestampNanos = targetPlayNanoTime
+            payload = "$masterSendNanoTime|$delayOffsetMs",
+            timestampNanos = masterSendNanoTime
         )
     }
 

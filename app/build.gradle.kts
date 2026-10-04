@@ -17,13 +17,16 @@ android {
     applicationId = "com.aistudio.soundmesh.wzqj"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.1-test"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
+    getByName("debug") {
+      System.getenv("SOUNDMESH_TEST_KEYSTORE_PATH")?.let { storeFile = file(it) }
+    }
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
@@ -34,6 +37,7 @@ android {
   }
 
   buildTypes {
+    debug { applicationIdSuffix = ".test" }
     release {
       isCrunchPngs = false
       isMinifyEnabled = false

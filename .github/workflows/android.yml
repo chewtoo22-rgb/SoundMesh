@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'codex/**' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -14,44 +14,66 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SOUNDMESH_TEST_KEYSTORE_PATH: ${{ github.workspace }}/.android-test/debug.keystore
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
           cache: gradle
-
+      - name: Restore test signing key
+        uses: actions/cache/restore@v4
+        with:
+          path: .android-test/debug.keystore
+          key: soundmesh-test-signing-v1
+      - name: Prepare test signing key
+        run: |
+          mkdir -p .android-test
+          if [ ! -f "$SOUNDMESH_TEST_KEYSTORE_PATH" ]; then
+            keytool -genkeypair -keystore "$SOUNDMESH_TEST_KEYSTORE_PATH" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=SoundMesh Test,O=SoundMesh,C=US" -noprompt
+          fi
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
-
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
       - name: Assemble debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
-
+      - name: Preserve test signing key
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: .android-test/debug.keystore
+          key: soundmesh-test-signing-v1
+      - name: Name test APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk SoundMesh-1.1-test.apk
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: soundmesh-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: SoundMesh-1.1-test.apk
           if-no-files-found: error
           retention-days: 90
-
-      - name: Unit tests
-        continue-on-error: true
-        run: ./gradlew test --no-daemon --stacktrace
-
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soundmesh-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
       - name: Publish GitHub Release
-        if: github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && github.event_name == 'push')
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: apk-${{ github.run_number }}
-          name: SoundMesh build ${{ github.run_number }}
-          files: app/build/outputs/apk/debug/*.apk
-          generate_release_notes: true
+          tag_name: ${{ github.ref == 'refs/heads/main' && format('apk-{0}', github.run_number) || format('test-apk-{0}', github.run_number) }}
+          name: SoundMesh 1.1 test build ${{ github.run_number }}
+          files: SoundMesh-1.1-test.apk
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
           make_latest: false
           body: |
-            Sideload APK (debug-signed). Not on Play Store.
-            Install on Android 8+, allow this source, then pick Master or Speaker.
+            SoundMesh 1.1 testing APK (debug-signed). Install on every phone in the mesh.
+            Clock handshake, foreground capture lifecycle, service-owned engines, restart recovery and required regression tests.
+            Start with Party Beats on two phones using the same Wi-Fi/hotspot, then test system audio, screen-off playback and reconnecting.
+            Capturing another app requires Android 10+ and that app allowing playback capture.

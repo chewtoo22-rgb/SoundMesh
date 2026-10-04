@@ -29,7 +29,7 @@ enum class LatencyMode(
     val samplesPerFrame: Int
 ) {
     ULTRA_LOW("Ultra-Low Latency", "15–20ms • Gaming, Live Mic & PA (Minimal lag)", 18, 256),
-    BALANCED("Balanced Sync", "35–45ms • Spotify, YouTube, Movies (Anti-echo)", 40, 512),
+    BALANCED("Balanced Sync", "35–45ms • Spotify, YouTube, Movies", 40, 512),
     STABLE("Rock-Solid Mesh", "80–100ms • Large parties, crowded Wi-Fi (No dropouts)", 90, 1024)
 }
 

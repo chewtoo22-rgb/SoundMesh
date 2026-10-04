@@ -2,6 +2,18 @@
 
 All notable changes to SoundMesh are documented here.
 
+## 1.1-test — 2026-10-04
+
+- Four-timestamp clock synchronization with network-delay compensation and a low-jitter sample filter.
+- Auto-Sync buffer changes no longer overwrite clock offsets or reset duplicate-frame protection.
+- Service-owned engines survive Activity teardown; notification Stop releases audio/network resources.
+- Correct media-projection/microphone foreground types; capture revocation pauses playback and requests new consent.
+- Blocking AudioRecord teardown unblocks reads before releasing the recorder.
+- Restarted-master session IDs reset sequence/clock state; master timeout and explicit-IP pinning support reconnecting.
+- Exact nanosecond synth pacing avoids accumulating a 44.1 kHz rate mismatch.
+- Unit tests must pass before APK publication; clock/session and service-lifetime regressions covered.
+- Version code incremented to 2. Hardware sync and Bluetooth latency remain device-test items.
+
 ## Unreleased
 
 ### Added

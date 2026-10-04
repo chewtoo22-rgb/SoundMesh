@@ -564,7 +564,7 @@ fun SpeakerReceiverScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = if (state.isConnectedToMaster) "SPEAKER ONLINE • PHASE-LOCKED" else "SEARCHING FOR MASTER PHONE...",
+                        text = if (state.isConnectedToMaster) "SPEAKER ONLINE • STREAM CONNECTED" else "SEARCHING FOR MASTER PHONE...",
                         style = MaterialTheme.typography.titleMedium,
                         color = if (state.isConnectedToMaster) SonicEmerald else SonicAmber,
                         letterSpacing = 1.2.sp
@@ -592,7 +592,7 @@ fun SpeakerReceiverScreen(
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = "ZERO-ECHO PTS SYNC",
+                                text = "TIMESTAMPED AUDIO",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = SonicEmerald,
                                 fontSize = 9.sp
